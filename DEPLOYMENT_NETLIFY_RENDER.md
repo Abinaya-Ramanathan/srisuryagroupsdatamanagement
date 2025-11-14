@@ -72,10 +72,12 @@ git push -u origin Master
    - **Publish directory**: `client/dist`
 5. Click **"Show advanced"** and add **Environment Variable**:
    - **Key**: `VITE_API_URL`
-   - **Value**: `https://employee-management-backend.onrender.com` (your backend URL from Step 2)
+   - **Value**: `https://srisuryagroupsdatamanagement.onrender.com` (your backend URL from Step 2)
 6. Click **"Deploy site"**
 7. Wait for deployment (2-5 minutes)
 8. **Your site is live!** Netlify gives you a URL like `https://your-app-name.netlify.app`
+
+**Note**: The `_redirects` file in `client/public/` and `netlify.toml` at the root ensure React Router routes work correctly (fixes 404 errors for routes like `/database`).
 
 ---
 
