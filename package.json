@@ -1,0 +1,32 @@
+{
+  "name": "employee-management-system",
+  "version": "1.0.0",
+  "description": "Employee Data Management System for Sri Suriya Group",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "nodemon server/index.js",
+    "client": "cd client && npm run dev",
+    "install-all": "npm install && cd client && npm install",
+    "clear-db": "node server/database/clear-db.js",
+    "view-db": "node server/database/view-db.js",
+    "manage-db": "node server/database/manage-db.js",
+    "build": "cd client && npm run build",
+    "start": "cd server && node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "sqlite3": "^5.1.6",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "concurrently": "^8.2.0"
+  }
+}

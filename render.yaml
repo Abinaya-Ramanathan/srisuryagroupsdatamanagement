@@ -1,0 +1,31 @@
+services:
+  # Backend Service
+  - type: web
+    name: employee-management-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: cd server && node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+    disk:
+      name: employee-db
+      mountPath: /opt/render/project/src/server/database
+      sizeGB: 1
+
+  # Frontend Service
+  - type: web
+    name: employee-management-frontend
+    env: node
+    plan: free
+    buildCommand: cd client && npm install && npm run build
+    startCommand: cd client && npx serve -s dist -l 10000
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: VITE_API_URL
+        value: https://employee-management-backend.onrender.com
+
