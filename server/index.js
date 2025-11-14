@@ -8,6 +8,7 @@ const employeeRoutes = require('./routes/employees');
 const attendanceRoutes = require('./routes/attendance');
 const advanceRoutes = require('./routes/advance');
 const sectorRoutes = require('./routes/sectors');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -23,6 +24,7 @@ app.use('/api/employees', employeeRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/advance', advanceRoutes);
 app.use('/api/sectors', sectorRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Initialize database
 const db = require('./database/db');

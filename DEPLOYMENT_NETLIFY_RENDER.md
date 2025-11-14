@@ -23,9 +23,13 @@
 ```bash
 git init
 git add .
+git config --global user.email "rabinayasep@gmail.com"
+git config --global user.name "abinayaramanathan"
 git commit -m "Ready for deployment"
 git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
-git push -u origin main
+git remote add origin https://github.com/Abinaya-Ramanathan/srisuryagroupsdatamanagement.git
+git branch -M Master  
+git push -u origin Master
 ```
 
 ---
@@ -36,10 +40,10 @@ git push -u origin main
 2. Click **"New +"** → **"Web Service"**
 3. Connect your GitHub repository
 4. Configure:
-   - **Name**: `employee-management-backend`
+   - **Name**: `srisuryagroupsdatamanagement`
    - **Environment**: `Node`
    - **Build Command**: `npm install`
-   - **Start Command**: `cd server && node index.js`
+   - **Start Command**: `node server/index.js`
    - **Plan**: **Free**
 5. Add **Environment Variables**:
    - `NODE_ENV` = `production`
@@ -52,7 +56,7 @@ git push -u origin main
    - **Size**: 1 GB
 7. Click **"Create Web Service"**
 8. Wait for deployment (5-10 minutes)
-9. **Copy your backend URL** (e.g., `https://employee-management-backend.onrender.com`)
+9. **Copy your backend URL** (e.g., `https://employee-management-backend.onrender.com`)   https://srisuryagroupsdatamanagement.onrender.com
    - You'll see it in the Render dashboard once deployed
 
 ---
