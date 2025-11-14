@@ -560,12 +560,6 @@ const User1Dashboard = () => {
               Employee View
             </button>
             <button
-              onClick={() => navigate('/database')}
-              className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition"
-            >
-              Database Management
-            </button>
-            <button
               onClick={logout}
               className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
             >
