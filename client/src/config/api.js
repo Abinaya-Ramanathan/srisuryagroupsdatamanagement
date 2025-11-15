@@ -15,9 +15,10 @@ const getApiUrl = () => {
 
 export const API_BASE_URL = getApiUrl();
 
-// Configure axios default baseURL
+// Configure axios default baseURL and timeout
 import axios from 'axios';
 axios.defaults.baseURL = API_BASE_URL;
+axios.defaults.timeout = 30000; // 30 seconds timeout
 
 export default axios;
 

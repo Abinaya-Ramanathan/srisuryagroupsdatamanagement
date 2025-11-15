@@ -38,9 +38,22 @@ export const AuthProvider = ({ children }) => {
       
       return { success: true };
     } catch (error) {
+      let errorMessage = 'Login failed';
+      
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        errorMessage = 'Request timed out. The server may be starting up. Please try again in a few seconds.';
+      } else if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
+        errorMessage = 'Cannot connect to server. Please check your internet connection or the server may be down.';
+      } else if (error.response) {
+        errorMessage = error.response.data?.error || `Server error: ${error.response.status}`;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      console.error('Login error:', error);
       return { 
         success: false, 
-        error: error.response?.data?.error || 'Login failed' 
+        error: errorMessage
       };
     }
   };

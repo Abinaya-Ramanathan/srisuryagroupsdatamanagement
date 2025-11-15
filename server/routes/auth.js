@@ -14,7 +14,14 @@ router.post('/login', async (req, res) => {
   }
 
   try {
+    const startTime = Date.now();
     const result = await query('SELECT * FROM users WHERE user_id = $1', [user_id]);
+    const queryTime = Date.now() - startTime;
+    
+    if (queryTime > 1000) {
+      console.warn(`Slow database query: ${queryTime}ms`);
+    }
+
     const user = result.rows[0];
 
     if (!user) {
@@ -42,7 +49,13 @@ router.post('/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Database error' });
+    
+    // Provide more specific error messages
+    if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
+      return res.status(503).json({ error: 'Database connection failed. Please try again in a few moments.' });
+    }
+    
+    res.status(500).json({ error: 'Database error. Please check server logs.' });
   }
 });
 
