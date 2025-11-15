@@ -1,139 +1,124 @@
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
-const path = require('path');
 
-const dbPath = path.join(__dirname, 'database.sqlite');
-const db = new sqlite3.Database(dbPath);
+// PostgreSQL connection configuration
+// Uses DATABASE_URL from environment (provided by Render) or local connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
 
-const init = () => {
-  // Users table
-  db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('user1', 'user2')),
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
+// Log connection status
+console.log('PostgreSQL database connected');
+if (process.env.DATABASE_URL) {
+  console.log('Using DATABASE_URL from environment');
+} else {
+  console.log('Using local PostgreSQL connection (DATABASE_URL not set)');
+}
+
+// Helper function to execute queries
+const query = async (text, params) => {
+  const start = Date.now();
+  try {
+    const res = await pool.query(text, params);
+    const duration = Date.now() - start;
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Executed query', { text, duration, rows: res.rowCount });
+    }
+    return res;
+  } catch (error) {
+    console.error('Database query error', { text, error: error.message });
+    throw error;
+  }
+};
+
+// Initialize database tables
+const init = async () => {
+  try {
+    // Users table
+    await query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(255) UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role VARCHAR(50) NOT NULL CHECK(role IN ('user1', 'user2')),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
     // Sectors table
-    db.run(`CREATE TABLE IF NOT EXISTS sectors (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      code TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL
-    )`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS sectors (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(50) UNIQUE NOT NULL,
+        name VARCHAR(255) NOT NULL
+      )
+    `);
 
     // Employees table
-    db.run(`CREATE TABLE IF NOT EXISTS employees (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sector_id INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      phone TEXT,
-      address TEXT,
-      bank_account TEXT,
-      bank_ifsc TEXT,
-      bank_name TEXT,
-      monthly_wage REAL,
-      weekly_wage REAL,
-      salary REAL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (sector_id) REFERENCES sectors(id)
-    )`);
-
-    const safeAlter = (sql) => {
-      db.run(sql, (alterErr) => {
-        if (alterErr && !alterErr.message.includes('duplicate column name')) {
-          console.error(`Failed to run migration: ${sql}`, alterErr);
-        }
-      });
-    };
-
-    // Ensure new employee salary metadata columns exist
-    safeAlter(`ALTER TABLE employees ADD COLUMN salary_frequency TEXT DEFAULT 'daily'`);
-    safeAlter(`ALTER TABLE employees ADD COLUMN salary_payment_status TEXT DEFAULT 'not_provided'`);
-    safeAlter(`ALTER TABLE employees ADD COLUMN salary_payment_amount REAL`);
-    safeAlter(`ALTER TABLE employees ADD COLUMN salary_payment_date TEXT`);
-    safeAlter(`ALTER TABLE employees ADD COLUMN employee_type TEXT DEFAULT 'worker'`);
-    safeAlter(`ALTER TABLE employees ADD COLUMN employee_count INTEGER DEFAULT 1`);
-    safeAlter(`ALTER TABLE employees ADD COLUMN designation TEXT DEFAULT 'employee'`);
-    safeAlter(`ALTER TABLE employees ADD COLUMN reason TEXT`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS employees (
+        id SERIAL PRIMARY KEY,
+        sector_id INTEGER NOT NULL REFERENCES sectors(id),
+        name VARCHAR(255) NOT NULL,
+        phone VARCHAR(50),
+        address TEXT,
+        bank_account VARCHAR(255),
+        bank_ifsc VARCHAR(50),
+        bank_name VARCHAR(255),
+        monthly_wage DECIMAL(10, 2),
+        weekly_wage DECIMAL(10, 2),
+        salary DECIMAL(10, 2),
+        salary_frequency VARCHAR(50) DEFAULT 'daily',
+        salary_payment_status VARCHAR(50) DEFAULT 'not_provided',
+        salary_payment_amount DECIMAL(10, 2),
+        salary_payment_date DATE,
+        employee_type VARCHAR(50) DEFAULT 'worker',
+        employee_count INTEGER DEFAULT 1,
+        designation VARCHAR(50) DEFAULT 'employee',
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
     // Attendance table
-    db.run(`CREATE TABLE IF NOT EXISTS attendance (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      employee_id INTEGER NOT NULL,
-      date TEXT NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('present', 'absent', 'half')),
-      created_by INTEGER,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (employee_id) REFERENCES employees(id),
-      FOREIGN KEY (created_by) REFERENCES users(id),
-      UNIQUE(employee_id, date)
-    )`);
-
-    // Ensure attendance table allows half-day entries for legacy databases
-    db.get(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'attendance'`, (err, row) => {
-      if (err) {
-        console.error('Failed to inspect attendance table', err);
-        return;
-      }
-
-      if (row && row.sql && !row.sql.includes("'half'")) {
-        db.serialize(() => {
-          console.log('Upgrading attendance table to support half-day statuses');
-          db.run('PRAGMA foreign_keys=off');
-          db.run('ALTER TABLE attendance RENAME TO attendance__old');
-          db.run(`CREATE TABLE attendance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            employee_id INTEGER NOT NULL,
-            date TEXT NOT NULL,
-            status TEXT NOT NULL CHECK(status IN ('present', 'absent', 'half')),
-            created_by INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (employee_id) REFERENCES employees(id),
-            FOREIGN KEY (created_by) REFERENCES users(id),
-            UNIQUE(employee_id, date)
-          )`);
-          db.run(`INSERT INTO attendance (id, employee_id, date, status, created_by, created_at)
-                  SELECT id, employee_id, date, status, created_by, created_at FROM attendance__old`);
-          db.run('DROP TABLE attendance__old');
-          db.run('PRAGMA foreign_keys=on');
-        });
-      }
-    });
+    await query(`
+      CREATE TABLE IF NOT EXISTS attendance (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id),
+        date DATE NOT NULL,
+        status VARCHAR(50) NOT NULL CHECK(status IN ('present', 'absent', 'half')),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(employee_id, date)
+      )
+    `);
 
     // Advances table
-    db.run(`CREATE TABLE IF NOT EXISTS advances (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      employee_id INTEGER NOT NULL,
-      amount REAL NOT NULL,
-      date TEXT NOT NULL,
-      type TEXT NOT NULL DEFAULT 'taken' CHECK(type IN ('taken','paid')),
-      created_by INTEGER,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (employee_id) REFERENCES employees(id),
-      FOREIGN KEY (created_by) REFERENCES users(id)
-    )`);
+    await query(`
+      CREATE TABLE IF NOT EXISTS advances (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id),
+        amount DECIMAL(10, 2) NOT NULL,
+        date DATE NOT NULL,
+        type VARCHAR(50) NOT NULL DEFAULT 'taken' CHECK(type IN ('taken', 'paid')),
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
     // Daily employee counts table (for non-workers)
-    db.run(`CREATE TABLE IF NOT EXISTS daily_employee_counts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      employee_id INTEGER NOT NULL,
-      date TEXT NOT NULL,
-      count INTEGER NOT NULL DEFAULT 1,
-      created_by INTEGER,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (employee_id) REFERENCES employees(id),
-      FOREIGN KEY (created_by) REFERENCES users(id),
-      UNIQUE(employee_id, date)
-    )`);
-
-    // Ensure legacy databases have the advance type column
-    db.run(`ALTER TABLE advances ADD COLUMN type TEXT DEFAULT 'taken'`, (alterErr) => {
-      if (alterErr && !alterErr.message.includes('duplicate column')) {
-        console.error('Failed to add type column to advances table', alterErr);
-      }
-    });
+    await query(`
+      CREATE TABLE IF NOT EXISTS daily_employee_counts (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER NOT NULL REFERENCES employees(id),
+        date DATE NOT NULL,
+        count INTEGER NOT NULL DEFAULT 1,
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(employee_id, date)
+      )
+    `);
 
     // Insert default sectors
     const sectors = [
@@ -144,26 +129,38 @@ const init = () => {
       { code: 'SSACF', name: 'Sri Surya Agro and Cattle Farm' }
     ];
 
-    sectors.forEach(sector => {
-      db.run(`INSERT OR IGNORE INTO sectors (code, name) VALUES (?, ?)`, 
-        [sector.code, sector.name]);
-    });
+    for (const sector of sectors) {
+      await query(
+        `INSERT INTO sectors (code, name) VALUES ($1, $2) ON CONFLICT (code) DO NOTHING`,
+        [sector.code, sector.name]
+      );
+    }
 
     // Create default admin user (user1) - password: admin123
     const defaultPassword = bcrypt.hashSync('admin123', 10);
-    db.run(`INSERT OR IGNORE INTO users (user_id, password, role) VALUES (?, ?, ?)`,
-      ['admin', defaultPassword, 'user1']);
+    await query(
+      `INSERT INTO users (user_id, password, role) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING`,
+      ['admin', defaultPassword, 'user1']
+    );
 
     // Create default employee user (user2) - password: employee123
     const empPassword = bcrypt.hashSync('employee123', 10);
-    db.run(`INSERT OR IGNORE INTO users (user_id, password, role) VALUES (?, ?, ?)`,
-      ['employee', empPassword, 'user2']);
+    await query(
+      `INSERT INTO users (user_id, password, role) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING`,
+      ['employee', empPassword, 'user2']
+    );
 
-    console.log('Database initialized successfully');
-  });
+    console.log('PostgreSQL database initialized successfully');
+  } catch (error) {
+    console.error('Database initialization error:', error);
+    throw error;
+  }
 };
 
-const getDb = () => db;
+// Get database pool for direct access (for complex queries)
+const getDb = () => pool;
 
-module.exports = { init, getDb };
+// Get query helper
+const getQuery = () => query;
 
+module.exports = { init, getDb, query, getQuery };

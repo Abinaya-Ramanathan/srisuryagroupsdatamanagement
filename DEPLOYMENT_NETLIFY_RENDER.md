@@ -49,11 +49,13 @@ git push -u origin Master
    - `NODE_ENV` = `production`
    - `PORT` = `10000` (Render sets this automatically)
    - `JWT_SECRET` = (generate a random string, e.g., `my-secret-key-123`)
-6. Add a **Disk** (for SQLite database):
+   - `DATABASE_PATH` = `/opt/render/project/src/server/database/database.sqlite` (optional but recommended)
+6. Add a **Disk** (for SQLite database) - **CRITICAL FOR DATA PERSISTENCE**:
    - Click **"Add Disk"**
    - **Name**: `employee-db`
-   - **Mount Path**: `/opt/render/project/src/server/database`
+   - **Mount Path**: `/opt/render/project/src/server/database` (must be exact!)
    - **Size**: 1 GB
+   - **⚠️ IMPORTANT**: Without this disk, your database will be wiped on every deployment!
 7. Click **"Create Web Service"**
 8. Wait for deployment (5-10 minutes)
 9. **Copy your backend URL** (e.g., `https://employee-management-backend.onrender.com`)   https://srisuryagroupsdatamanagement.onrender.com

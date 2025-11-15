@@ -1,28 +1,27 @@
 const express = require('express');
-const { getDb } = require('../database/db');
-const { authenticate } = require('../middleware/auth');
+const { query } = require('../database/db');
+const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
-const db = getDb();
 
 // Get advances for an employee
-router.get('/employee/:employeeId', authenticate, (req, res) => {
+router.get('/employee/:employeeId', authenticate, async (req, res) => {
   const { employeeId } = req.params;
 
-  db.all(
-    'SELECT * FROM advances WHERE employee_id = ? ORDER BY date DESC',
-    [employeeId],
-    (err, advances) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      res.json(advances);
-    }
-  );
+  try {
+    const result = await query(
+      'SELECT * FROM advances WHERE employee_id = $1 ORDER BY date DESC',
+      [employeeId]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching advances:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Add advance (User 2 can add, User 1 can also add)
-router.post('/', authenticate, (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   const { employee_id, amount, date, type = 'taken' } = req.body;
 
   if (!employee_id || amount === undefined || amount === null || !date) {
@@ -38,37 +37,38 @@ router.post('/', authenticate, (req, res) => {
     return res.status(400).json({ error: 'Type must be either taken or paid' });
   }
 
-  db.run(
-    'INSERT INTO advances (employee_id, amount, date, type, created_by) VALUES (?, ?, ?, ?, ?)',
-    [employee_id, parsedAmount, date, type, req.user.id],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      res.json({ id: this.lastID, message: 'Advance added successfully' });
-    }
-  );
+  try {
+    const result = await query(
+      'INSERT INTO advances (employee_id, amount, date, type, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [employee_id, parsedAmount, date, type, req.user.id]
+    );
+    res.json({ id: result.rows[0].id, message: 'Advance added successfully' });
+  } catch (error) {
+    console.error('Error adding advance:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Update advance
-router.put('/:id', authenticate, (req, res) => {
+router.put('/:id', authenticate, async (req, res) => {
   const { id } = req.params;
   const { amount, date, type } = req.body;
 
   const updates = [];
   const params = [];
+  let paramIndex = 1;
 
   if (amount !== undefined) {
     const parsedAmount = Number(amount);
     if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
       return res.status(400).json({ error: 'Valid amount is required' });
     }
-    updates.push('amount = ?');
+    updates.push(`amount = $${paramIndex++}`);
     params.push(parsedAmount);
   }
 
   if (date) {
-    updates.push('date = ?');
+    updates.push(`date = $${paramIndex++}`);
     params.push(date);
   }
 
@@ -76,7 +76,7 @@ router.put('/:id', authenticate, (req, res) => {
     if (!['taken', 'paid'].includes(type)) {
       return res.status(400).json({ error: 'Type must be either taken or paid' });
     }
-    updates.push('type = ?');
+    updates.push(`type = $${paramIndex++}`);
     params.push(type);
   }
 
@@ -85,34 +85,34 @@ router.put('/:id', authenticate, (req, res) => {
   }
 
   params.push(id);
+  const updateQuery = `UPDATE advances SET ${updates.join(', ')} WHERE id = $${paramIndex}`;
 
-  const updateQuery = `UPDATE advances SET ${updates.join(', ')} WHERE id = ?`;
-
-  db.run(updateQuery, params, function(err) {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
-    if (this.changes === 0) {
+  try {
+    const result = await query(updateQuery, params);
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Advance record not found' });
     }
     res.json({ message: 'Advance updated successfully' });
-  });
+  } catch (error) {
+    console.error('Error updating advance:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Delete advance (User 1 only)
-router.delete('/:id', authenticate, require('../middleware/auth').requireRole(['user1']), (req, res) => {
+router.delete('/:id', authenticate, requireRole(['user1']), async (req, res) => {
   const { id } = req.params;
 
-  db.run('DELETE FROM advances WHERE id = ?', [id], function(err) {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
-    if (this.changes === 0) {
+  try {
+    const result = await query('DELETE FROM advances WHERE id = $1', [id]);
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Advance record not found' });
     }
     res.json({ message: 'Advance deleted successfully' });
-  });
+  } catch (error) {
+    console.error('Error deleting advance:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 module.exports = router;
-

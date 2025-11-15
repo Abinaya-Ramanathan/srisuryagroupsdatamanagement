@@ -28,7 +28,10 @@ app.use('/api/admin', adminRoutes);
 
 // Initialize database
 const db = require('./database/db');
-db.init();
+db.init().catch(err => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

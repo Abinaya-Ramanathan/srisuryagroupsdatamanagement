@@ -1,36 +1,36 @@
 const express = require('express');
-const { getDb } = require('../database/db');
+const { query } = require('../database/db');
 const { authenticate, requireRole } = require('../middleware/auth');
 
 const router = express.Router();
-const db = getDb();
 const VALID_STATUSES = ['present', 'absent', 'half'];
 
 // Get attendance for an employee
-router.get('/employee/:employeeId', authenticate, (req, res) => {
+router.get('/employee/:employeeId', authenticate, async (req, res) => {
   const { employeeId } = req.params;
   const { startDate, endDate } = req.query;
 
-  let query = 'SELECT * FROM attendance WHERE employee_id = ?';
-  const params = [employeeId];
+  try {
+    let queryText = 'SELECT * FROM attendance WHERE employee_id = $1';
+    const params = [employeeId];
 
-  if (startDate && endDate) {
-    query += ' AND date BETWEEN ? AND ?';
-    params.push(startDate, endDate);
-  }
-
-  query += ' ORDER BY date DESC';
-
-  db.all(query, params, (err, attendance) => {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
+    if (startDate && endDate) {
+      queryText += ' AND date BETWEEN $2 AND $3';
+      params.push(startDate, endDate);
     }
-    res.json(attendance);
-  });
+
+    queryText += ' ORDER BY date DESC';
+
+    const result = await query(queryText, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching attendance:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Mark attendance (User 2 can mark, User 1 can also mark)
-router.post('/', authenticate, (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   const { employee_id, date, status } = req.body;
 
   if (!employee_id || !date || !status) {
@@ -41,21 +41,24 @@ router.post('/', authenticate, (req, res) => {
     return res.status(400).json({ error: 'Status must be present, absent, or half' });
   }
 
-  db.run(
-    `INSERT OR REPLACE INTO attendance (employee_id, date, status, created_by)
-     VALUES (?, ?, ?, ?)`,
-    [employee_id, date, status, req.user.id],
-    function(err) {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
-      res.json({ id: this.lastID, message: 'Attendance marked successfully' });
-    }
-  );
+  try {
+    const result = await query(
+      `INSERT INTO attendance (employee_id, date, status, created_by)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (employee_id, date)
+       DO UPDATE SET status = EXCLUDED.status, created_by = EXCLUDED.created_by, created_at = CURRENT_TIMESTAMP
+       RETURNING id`,
+      [employee_id, date, status, req.user.id]
+    );
+    res.json({ id: result.rows[0].id, message: 'Attendance marked successfully' });
+  } catch (error) {
+    console.error('Error marking attendance:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Update attendance
-router.put('/:id', authenticate, (req, res) => {
+router.put('/:id', authenticate, async (req, res) => {
   const { id } = req.params;
   const { status, date } = req.body;
 
@@ -63,40 +66,47 @@ router.put('/:id', authenticate, (req, res) => {
     return res.status(400).json({ error: 'Valid status is required' });
   }
 
-  const updateQuery = date 
-    ? 'UPDATE attendance SET status = ?, date = ? WHERE id = ?'
-    : 'UPDATE attendance SET status = ? WHERE id = ?';
-  
-  const params = date ? [status, date, id] : [status, id];
+  try {
+    let updateQuery;
+    let params;
 
-  db.run(updateQuery, params, function(err) {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
+    if (date) {
+      updateQuery = 'UPDATE attendance SET status = $1, date = $2 WHERE id = $3';
+      params = [status, date, id];
+    } else {
+      updateQuery = 'UPDATE attendance SET status = $1 WHERE id = $2';
+      params = [status, id];
     }
-    if (this.changes === 0) {
+
+    const result = await query(updateQuery, params);
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Attendance record not found' });
     }
     res.json({ message: 'Attendance updated successfully' });
-  });
+  } catch (error) {
+    console.error('Error updating attendance:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Delete attendance (User 1 only)
-router.delete('/:id', authenticate, requireRole(['user1']), (req, res) => {
+router.delete('/:id', authenticate, requireRole(['user1']), async (req, res) => {
   const { id } = req.params;
 
-  db.run('DELETE FROM attendance WHERE id = ?', [id], function(err) {
-    if (err) {
-      return res.status(500).json({ error: 'Database error' });
-    }
-    if (this.changes === 0) {
+  try {
+    const result = await query('DELETE FROM attendance WHERE id = $1', [id]);
+    if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Attendance record not found' });
     }
     res.json({ message: 'Attendance deleted successfully' });
-  });
+  } catch (error) {
+    console.error('Error deleting attendance:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Get attendance sheet data for a sector and month
-router.get('/sector/:sectorId', authenticate, (req, res) => {
+router.get('/sector/:sectorId', authenticate, async (req, res) => {
   const { sectorId } = req.params;
   const { month } = req.query; // format YYYY-MM
 
@@ -114,44 +124,41 @@ router.get('/sector/:sectorId', authenticate, (req, res) => {
   const startDate = `${month}-01`;
   const endDate = `${month}-${String(daysInMonth).padStart(2, '0')}`;
 
-  db.get('SELECT id, name FROM sectors WHERE id = ?', [sectorId], (sectorErr, sector) => {
-    if (sectorErr) {
-      return res.status(500).json({ error: 'Database error' });
-    }
+  try {
+    const sectorResult = await query('SELECT id, name FROM sectors WHERE id = $1', [sectorId]);
+    const sector = sectorResult.rows[0];
+
     if (!sector) {
       return res.status(404).json({ error: 'Sector not found' });
     }
 
-    db.all('SELECT id, name, phone FROM employees WHERE sector_id = ? ORDER BY name', [sectorId], (empErr, employees) => {
-      if (empErr) {
-        return res.status(500).json({ error: 'Database error' });
-      }
+    const employeesResult = await query(
+      'SELECT id, name, phone FROM employees WHERE sector_id = $1 ORDER BY name',
+      [sectorId]
+    );
 
-      db.all(
-        `SELECT a.employee_id, a.date, a.status
-         FROM attendance a
-         JOIN employees e ON e.id = a.employee_id
-         WHERE e.sector_id = ? AND a.date BETWEEN ? AND ?`,
-        [sectorId, startDate, endDate],
-        (attErr, attendance) => {
-          if (attErr) {
-            return res.status(500).json({ error: 'Database error' });
-          }
+    const attendanceResult = await query(
+      `SELECT a.employee_id, a.date, a.status
+       FROM attendance a
+       JOIN employees e ON e.id = a.employee_id
+       WHERE e.sector_id = $1 AND a.date BETWEEN $2 AND $3`,
+      [sectorId, startDate, endDate]
+    );
 
-          res.json({
-            sector,
-            employees,
-            attendance,
-            range: { startDate, endDate }
-          });
-        }
-      );
+    res.json({
+      sector,
+      employees: employeesResult.rows,
+      attendance: attendanceResult.rows,
+      range: { startDate, endDate }
     });
-  });
+  } catch (error) {
+    console.error('Error fetching attendance sheet:', error);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Bulk upsert/delete attendance entries
-router.post('/bulk', authenticate, (req, res) => {
+router.post('/bulk', authenticate, async (req, res) => {
   const { entries } = req.body;
 
   if (!Array.isArray(entries) || !entries.length) {
@@ -184,51 +191,41 @@ router.post('/bulk', authenticate, (req, res) => {
     return res.json({ message: 'No attendance changes detected' });
   }
 
-  db.serialize(() => {
-    const tasks = [];
+  try {
+    // Use a transaction for bulk operations
+    await query('BEGIN');
 
-    if (toInsert.length) {
-      const insertStmt = db.prepare(`
-        INSERT INTO attendance (employee_id, date, status, created_by)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(employee_id, date)
-        DO UPDATE SET status = excluded.status, created_by = excluded.created_by, created_at = CURRENT_TIMESTAMP
-      `);
+    try {
+      // Insert/update entries
+      if (toInsert.length) {
+        for (const { employee_id, date, status } of toInsert) {
+          await query(
+            `INSERT INTO attendance (employee_id, date, status, created_by)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (employee_id, date)
+             DO UPDATE SET status = EXCLUDED.status, created_by = EXCLUDED.created_by, created_at = CURRENT_TIMESTAMP`,
+            [employee_id, date, status, req.user.id]
+          );
+        }
+      }
 
-      toInsert.forEach(({ employee_id, date, status }) => {
-        tasks.push(new Promise((resolve, reject) => {
-          insertStmt.run([employee_id, date, status, req.user.id], function(err) {
-            if (err) return reject(err);
-            resolve();
-          });
-        }));
-      });
+      // Delete entries
+      if (toDelete.length) {
+        for (const { employee_id, date } of toDelete) {
+          await query('DELETE FROM attendance WHERE employee_id = $1 AND date = $2', [employee_id, date]);
+        }
+      }
 
-      tasks.push(new Promise((resolve, reject) => insertStmt.finalize((err) => err ? reject(err) : resolve())));
+      await query('COMMIT');
+      res.json({ message: 'Attendance updated successfully' });
+    } catch (error) {
+      await query('ROLLBACK');
+      throw error;
     }
-
-    if (toDelete.length) {
-      const deleteStmt = db.prepare('DELETE FROM attendance WHERE employee_id = ? AND date = ?');
-      toDelete.forEach(({ employee_id, date }) => {
-        tasks.push(new Promise((resolve, reject) => {
-          deleteStmt.run([employee_id, date], function(err) {
-            if (err) return reject(err);
-            resolve();
-          });
-        }));
-      });
-
-      tasks.push(new Promise((resolve, reject) => deleteStmt.finalize((err) => err ? reject(err) : resolve())));
-    }
-
-    Promise.all(tasks)
-      .then(() => res.json({ message: 'Attendance updated successfully' }))
-      .catch((error) => {
-        console.error('Bulk attendance update failed', error);
-        res.status(500).json({ error: 'Failed to update attendance' });
-      });
-  });
+  } catch (error) {
+    console.error('Bulk attendance update failed:', error);
+    res.status(500).json({ error: 'Failed to update attendance' });
+  }
 });
 
 module.exports = router;
-
